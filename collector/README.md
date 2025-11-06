@@ -8,9 +8,13 @@ Crie um arquivo `.env` (ou exporte as variáveis no shell) com os valores abaixo
 
 ```
 SPTRANS_API_TOKEN="<token da API Olho Vivo>"
+# ou defina SPTRANS_API_TOKEN_COMMAND com um comando que retorne o token
+# SPTRANS_API_TOKEN_COMMAND="aws secretsmanager get-secret-value ..."
 OLHO_VIVO_URL="http://api.olhovivo.sptrans.com.br/v2.1"  # opcional
 KAFKA_BOOTSTRAP_SERVERS="localhost:9092"                  # opcional
 ```
+
+Caso `SPTRANS_API_TOKEN_COMMAND` esteja configurado, o `run_microservice.sh` executará o comando em cada ciclo e exportará o valor retornado para `SPTRANS_API_TOKEN` antes de chamar o coletor.
 
 ## Executando manualmente
 
@@ -46,6 +50,8 @@ export TOPIC_POSICAO="sptrans.posicao"  # opcional
 export TOPIC_PREVISAO="sptrans.previsao" # opcional
 export TOPIC_LINHAS="sptrans.linhas"     # opcional
 export INTERVALO_CICLO_SEGUNDOS=300       # opcional
+# ou exporte SPTRANS_API_TOKEN_COMMAND para buscar o token dinamicamente
+# export SPTRANS_API_TOKEN_COMMAND="aws secretsmanager get-secret-value --query 'SecretString' --output text"
 
 ./run_microservice.sh
 ```
