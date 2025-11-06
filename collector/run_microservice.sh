@@ -27,9 +27,13 @@ while true; do
         ARGS+=(--previsao-linha "$PREVISAO_LINHA")
     fi
 
-    python3 main.py "${ARGS[@]}"
+    if python3 main.py "${ARGS[@]}"; then
+        echo "Ciclo finalizado com sucesso. Próxima execução em $INTERVALO_CICLO_SEGUNDOS segundos."
+    else
+        status=$?
+        echo "Ciclo finalizado com erro (código $status). Tentando novamente em $INTERVALO_CICLO_SEGUNDOS segundos."
+    fi
 
-    echo "Ciclo finalizado. Próxima execução em $INTERVALO_CICLO_SEGUNDOS segundos."
     echo "----------------------------------------------------"
     sleep "$INTERVALO_CICLO_SEGUNDOS"
 done
