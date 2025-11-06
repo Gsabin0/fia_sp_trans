@@ -1,75 +1,75 @@
-import os
 import logging
+from typing import Any, List
+
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 import json
 
+
 def _on_send_success(record_metadata):
-    logging.debug(f"Msg OK -> Tópico: {record_metadata.topic} [Partição {record_metadata.partition}]")
+    logging.debug(
+        "Msg OK -> Tópico: %s [Partição %s]", record_metadata.topic, record_metadata.partition
+    )
+
 
 def _on_send_error(excp):
     logging.error("Falha ao enviar msg para o Kafka", exc_info=excp)
 
+
 class KafkaMessenger:
-    def __init__(self, kafka_servers, topic):
+    def __init__(self, kafka_servers: str, topic: str):
         self.producer = None
         self.kafka_servers = kafka_servers
         self.topic = topic
 
         try:
             self.producer = KafkaProducer(
-                bootstrap_servers = self.kafka_servers.split(','),
+                bootstrap_servers=self.kafka_servers.split(','),
                 value_serializer=lambda v: json.dumps(v).encode('utf-8'),
-                acks='all',  # Confirmação de recebimento
-                retries=5,   # Tentar novamente 5 vezes em caso de falha
-                linger_ms=20 # Espera 20ms para agrupar mais msgs em um batch
+                acks='all',
+                retries=5,
+                linger_ms=20,
             )
             logging.info("KafkaProducer conectado com sucesso.")
-        except KafkaError as e:
-            logging.fatal(f"Não foi possível conectar ao Kafka: {e}")
+        except KafkaError as exc:
+            logging.fatal("Não foi possível conectar ao Kafka: %s", exc)
             raise
 
-    def send_message(self, messages: list):
-        """
-        Send messages to Kafka Broker.
+    def _normalize_messages(self, messages: Any) -> List[Any]:
+        if messages is None:
+            return []
+        if isinstance(messages, list):
+            return messages
+        return [messages]
 
-        Args:
-            topic (str): The Kafka Topic to send the message.
-            message (bytes): The serialized Avro message to send.
-
-        Returns:
-            bool: True if the message was sent successfully, False otherwise.
-
-        Example:
-            send_message(topic='att_stop', message=b'\x01\x02\x03')
-            True
-        """
+    def send_message(self, messages: Any) -> None:
+        """Send messages to Kafka Broker."""
         if not self.producer:
             logging.error("Producer não inicializado. Mensagens não enviadas.")
             return
 
-        if not messages:
-            logging.warning(f"Nenhuma mensagem para enviar ao tópico {self.topic}.")
+        normalized = self._normalize_messages(messages)
+        if not normalized:
+            logging.warning("Nenhuma mensagem para enviar ao tópico %s.", self.topic)
             return
 
-        logging.info(f"Enviando {len(messages)} mensagem(ns) para o tópico: {self.topic}")
+        logging.info("Enviando %s mensagem(ns) para o tópico: %s", len(normalized), self.topic)
         try:
-            for msg in messages:
-                self.producer.send(self.topic, value=msg).add_callback(_on_send_success).add_errback(_on_send_error)
-        except KafkaError as e:
-            logging.error(f"Erro ao enviar mensagens para {self.topic}: {e}")
+            for msg in normalized:
+                self.producer.send(self.topic, value=msg).add_callback(_on_send_success).add_errback(
+                    _on_send_error
+                )
+        except KafkaError as exc:
+            logging.error("Erro ao enviar mensagens para %s: %s", self.topic, exc)
 
-    def flush(self):
-        """
-        Força o envio de todas as mensagens no buffer.
-        Bloqueia até que todas as mensagens sejam enviadas.
-        """
+    def flush(self) -> None:
+        """Força o envio de todas as mensagens no buffer."""
         if self.producer:
             logging.info("Forçando envio de mensagens (flush)...")
             self.producer.flush()
             logging.info("Flush concluído.")
 
-    def close(self):
+    def close(self) -> None:
         """Close the Kafka Producer"""
         if self.producer:
             self.producer.close()
