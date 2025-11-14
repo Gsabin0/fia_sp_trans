@@ -1,76 +1,79 @@
-import os
-import requests
+"""Utilities to interact with the SPTrans Olho Vivo API."""
+from __future__ import annotations
+
 import json
-from datetime import datetime
+import logging
+from typing import Any, Dict, Optional
+from urllib.parse import urljoin
+
+import requests
+
 from kafka_messenger_utils import KafkaMessenger
 from kafka_topic_utils import KafkaAdm
-from dotenv import load_dotenv
 
-#TODO: salvar os dados da API diretamente dentro de um dataframe, ao inves de dicionario
-class ApiConection():
-    def __init__(self, api_token, api_base_url, api_get_url):
+
+class SpTransAPI:
+    """Simple client responsible for authenticating and requesting data."""
+
+    def __init__(self, api_token: str, base_url: str) -> None:
         self.api_token = api_token
-        self.api_base_url = api_base_url
-        self.api_get_url = api_get_url
+        self.base_url = base_url.rstrip("/")
+        self._session: Optional[requests.Session] = None
 
-
-
-    def auth(self) -> requests.Session:
-        """
-        Autentica na API da SPTrans 
-        """
-        auth_url = f'{self.api_base_url}/Login/Autenticar?token={self.api_token}'
+    def authenticate(self) -> bool:
+        """Authenticate against the SPTrans API and keep the session alive."""
+        auth_url = urljoin(f"{self.base_url}/", f"Login/Autenticar?token={self.api_token}")
         session = requests.Session()
-        
+
         try:
             response = session.post(auth_url)
-            # Levanta um erro caso a requisição falhe (ex: status 4xx ou 5xx)
-            response.raise_for_status() 
-            
-            if response.text == 'true':
-                print("Autenticação bem-sucedida!")
-                return session
-            else:
-                print(f"Falha na autenticação. Resposta: {response.text}")
-                return None
-        except requests.exceptions.RequestException as e:
-            print(f"Erro de conexão durante a autenticação: {e}")
-            return None
-        
-    def get_data(self, session: requests.Session) -> list:
-        if not session:
-            print("Sessão de autenticação inválida")
-            return None
-        
-        posicao_url = f'{self.api_base_url}/{self.api_get_url}'
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logging.error("Erro de conexão durante a autenticação: %s", exc)
+            return False
+
+        if response.text.strip().lower() == "true":
+            logging.info("Autenticação bem-sucedida na API da SPTrans.")
+            self._session = session
+            return True
+
+        logging.error("Falha na autenticação. Resposta da API: %s", response.text)
+        return False
+
+    def get(self, resource_path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Any]:
+        """Perform a GET request using the authenticated session."""
+        if not self._session:
+            raise RuntimeError("Sessão não autenticada. Execute 'authenticate' antes de coletar dados.")
+
+        url = urljoin(f"{self.base_url}/", resource_path.lstrip("/"))
 
         try:
-            response = session.get(posicao_url)
+            response = self._session.get(url, params=params)
             response.raise_for_status()
-            dados = response.json()
-            return dados
-        except requests.exceptions.RequestException as e:
-            print(f"Erro ao buscar posição dos veículos: {e}")
+            if not response.text:
+                logging.warning("Resposta vazia da API para %s", resource_path)
+                return None
+            return response.json()
+        except requests.exceptions.RequestException as exc:
+            logging.error("Erro ao acessar %s: %s", url, exc)
         except json.JSONDecodeError:
-            print("Erro ao decodificar a resposta JSON da API.")
-            
+            logging.error("Não foi possível converter a resposta da API em JSON.")
+
         return None
 
-    def save_data(self, dados:dict): 
-        """
-        Salva os dados retornados pela API em um arquivo JSON.
-        O nome do arquivo inclui a data e hora da coleta.
-        """
-        if not dados:
-            print("Nenhum dado para salvar.")
-            return
 
-        kafka_topic = KafkaAdm('localhost:9092', self.api_get_url)
-        kafka_messenger = KafkaMessenger('localhost:9092', self.api_get_url)
+def publish_to_kafka(kafka_servers: str, topic: str, payload: Any) -> None:
+    """Create (if necessary) the Kafka topic and publish the payload."""
+    if payload is None:
+        logging.warning("Nenhum dado para enviar ao tópico %s.", topic)
+        return
 
-        print(f"Criando topico {self.api_get_url}")
-        kafka_topic.criar_topico()
-        print("Enviando dados para o Kafka")
-        kafka_messenger.send_message(dados)
-        kafka_messenger.flush()
-        kafka_messenger.close()
+    kafka_topic = KafkaAdm(kafka_servers, topic)
+    kafka_topic.criar_topico()
+
+    messenger = KafkaMessenger(kafka_servers, topic)
+    try:
+        messenger.send_message(payload)
+        messenger.flush()
+    finally:
+        messenger.close()
